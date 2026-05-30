@@ -1,0 +1,61 @@
+# Vivado project files to ignore
+
+# Build результати
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.wcfg
+*.lock
+# Кеші та тимчасові директорії
+FPGA_2ch_ADC_12b_65M.cache/
+FPGA_2ch_ADC_12b_65M.hw/
+FPGA_2ch_ADC_12b_65M.ip_user_files/
+FPGA_2ch_ADC_12b_65M.sim/
+FPGA_2ch_ADC_12b_65M.runs/
+FPGA_2ch_ADC_12b_65M.gen/
+FPGA_2ch_ADC_12b_65M.Xil/
+*.tmp
+*.bak
+
+# Синтез / імплементація
+*.dcp
+*.ltx
+*.bit
+*.bin
+
+# Симуляція
+*.vcd
+*.wlf
+*.asdb
+*.vpd
+
+# IP generated files
+*.xci
+*.xcix
+*.bd
+*.bda
+*.veo
+*.vho
+
+# Reports
+*.rpt
+*.rpx
+
+# SDK / Vitis (якщо використовуєш)
+.sdk/
+FPGA_2ch_ADC_12b_65M.vitis/
+*.sdk/
+
+# OS / редактори
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+FPGA_2ch_ADC_12b_65M.vscode/
+FPGA_2ch_ADC_12b_65M.idea/
+
+# Backup / autosave
+*~
+*.orig
