@@ -1,5 +1,5 @@
 // ============================================================
-// adc_capture.v — захоплення 2× паралельних АЦП у SDRAM
+// adc_capture.v - захоплення 2× паралельних АЦП у SDRAM
 //                 (BATCH-BURST + чистий пост-тригер)
 //
 // АЦП: 12-біт паралельні, 65 Msps, 2 канали
@@ -109,8 +109,10 @@ always @(posedge adc_clk or negedge reset_n) begin
 end
 
 // ═══ ASYNC FIFO (adc→sdram), 26-біт × 1024 ══════════════════
+// ram_style=block → Vivado виводить RAMB36 (SDP, різні клоки)
+// КРИТИЧНО: BRAM-блок без async reset → економить ~25 000 FF
 localparam FIFO_AW=10;
-reg [25:0] fifo_mem [0:(1<<FIFO_AW)-1];
+(* ram_style = "block" *) reg [25:0] fifo_mem [0:(1<<FIFO_AW)-1];
 reg [FIFO_AW:0] wr_ptr_bin,wr_ptr_gray,rd_ptr_bin,rd_ptr_gray;
 function [FIFO_AW:0] bin2gray; input [FIFO_AW:0] b; bin2gray=b^(b>>1); endfunction
 function [FIFO_AW:0] gray2bin; input [FIFO_AW:0] g; integer i; reg[FIFO_AW:0]b;
@@ -118,10 +120,14 @@ function [FIFO_AW:0] gray2bin; input [FIFO_AW:0] g; integer i; reg[FIFO_AW:0]b;
     for(i=FIFO_AW-1;i>=0;i=i-1) b[i]=b[i+1]^g[i]; gray2bin=b; end
 endfunction
 
+// Write port: adc_clk, БЕЗ async reset (обов'язково для BRAM inference)
+always @(posedge adc_clk)
+    if(fifo_wen) fifo_mem[wr_ptr_bin[FIFO_AW-1:0]] <= fifo_wdata;
+
+// Write pointer: окремо, з async reset
 always @(posedge adc_clk or negedge reset_n) begin
     if(!reset_n) begin wr_ptr_bin<=0; wr_ptr_gray<=0; end
     else if(fifo_wen) begin
-        fifo_mem[wr_ptr_bin[FIFO_AW-1:0]]<=fifo_wdata;
         wr_ptr_bin<=wr_ptr_bin+1; wr_ptr_gray<=bin2gray(wr_ptr_bin+1);
     end
 end
@@ -131,10 +137,14 @@ wire [FIFO_AW:0] wr_ptr_sync = gray2bin(wr_gray_s2);
 wire [FIFO_AW:0] fifo_fill   = wr_ptr_sync - rd_ptr_bin;
 
 reg [25:0] fifo_rdata; reg fifo_ren;
+// Read port: sdram_clk, БЕЗ async reset (обов'язково для BRAM inference)
+always @(posedge sdram_clk)
+    if(fifo_ren) fifo_rdata <= fifo_mem[rd_ptr_bin[FIFO_AW-1:0]];
+
+// Read pointer: окремо, з async reset
 always @(posedge sdram_clk or negedge reset_n) begin
-    if(!reset_n) begin rd_ptr_bin<=0; rd_ptr_gray<=0; fifo_rdata<=0; end
+    if(!reset_n) begin rd_ptr_bin<=0; rd_ptr_gray<=0; end
     else if(fifo_ren) begin
-        fifo_rdata<=fifo_mem[rd_ptr_bin[FIFO_AW-1:0]];
         rd_ptr_bin<=rd_ptr_bin+1; rd_ptr_gray<=bin2gray(rd_ptr_bin+1);
     end
 end
