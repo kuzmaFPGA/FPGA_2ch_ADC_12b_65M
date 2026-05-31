@@ -152,15 +152,6 @@
           <Attr Name="UsedIn" Val="simulation"/>
         </FileInfo>
       </File>
-      <File Path="$PSRCDIR/sources_1/imports/oscilloscope_fpga/rtl/divider.v">
-        <FileInfo>
-          <Attr Name="ImportPath" Val="C:/Users/kuzem/Downloads/oscilloscope_fpga/oscilloscope_fpga/rtl/divider.v"/>
-          <Attr Name="ImportTime" Val="1780139273"/>
-          <Attr Name="UsedIn" Val="synthesis"/>
-          <Attr Name="UsedIn" Val="implementation"/>
-          <Attr Name="UsedIn" Val="simulation"/>
-        </FileInfo>
-      </File>
       <File Path="$PSRCDIR/sources_1/imports/oscilloscope_fpga/rtl/multiboot.v">
         <FileInfo>
           <Attr Name="ImportPath" Val="C:/Users/kuzem/Downloads/oscilloscope_fpga/oscilloscope_fpga/rtl/multiboot.v"/>

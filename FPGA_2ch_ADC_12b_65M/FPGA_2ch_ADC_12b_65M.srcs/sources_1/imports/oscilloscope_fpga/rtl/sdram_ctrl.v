@@ -20,8 +20,8 @@
 // та захоплення DQ критичні — тюнити на HW.
 // ============================================================
 module sdram_ctrl #(
-    parameter CLK_MHZ = 100,   // частота sdram_clk (МГц)
-    parameter CL      = 2      // CAS latency: 3 для 166МГц, 2 для ≤133МГц
+    parameter CLK_MHZ = 166,   // частота sdram_clk (МГц)
+    parameter CL      = 3      // CAS latency: 3 для 166МГц, 2 для ≤133МГц
 ) (
     input             clk,
     input             reset_n,

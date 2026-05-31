@@ -192,23 +192,23 @@ module lcd_write_cmd_ndata (
 	output reg LCD_RDX,      // RDX (read control)
 	output reg [15:0] LCD_DATA, // Шина даних
 	output reg done,          // Сигнал завершення запису
-    reg [31:0] data_count   // Лічильник записаних даних	
+    output reg [31:0] data_count   // Лічильник записаних даних	
 //output reg next_data      // сигнал на зчитування наступного пікселя
 	//output wire [7:0] debug
 );
 
-typedef enum logic [3:0] {
-    IDLE,
-    SET_COMMAND,
-    WRITE_COMMAND_TO_LCD,
-    NOOP_AFTER_WRITE_COMMAND,
-    SET_DATA,
-    WRITE_DATA_TO_LCD,
-    PAUSE,
-    FILL_DONE
-} fill_display_state_t;
+// plain Verilog (was typedef enum)
+localparam [3:0]
+    IDLE                   = 4'd0,
+    SET_COMMAND            = 4'd1,
+    WRITE_COMMAND_TO_LCD   = 4'd2,
+    NOOP_AFTER_WRITE_COMMAND= 4'd3,
+    SET_DATA               = 4'd4,
+    WRITE_DATA_TO_LCD      = 4'd5,
+    PAUSE                  = 4'd6,
+    FILL_DONE              = 4'd7;
 
-fill_display_state_t fill_display_state;
+reg [3:0] fill_display_state;
 //assign debug[3:0] = fill_display_state;
 
 

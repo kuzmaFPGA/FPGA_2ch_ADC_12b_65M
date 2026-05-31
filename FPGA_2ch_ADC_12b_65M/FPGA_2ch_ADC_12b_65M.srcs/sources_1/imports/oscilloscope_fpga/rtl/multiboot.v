@@ -1,13 +1,13 @@
 // ============================================================
-// multiboot.v - MultiBoot для Xilinx Artix-7
+// multiboot.v — MultiBoot для Xilinx Artix-7
 //
 // Дозволяє перемикатися між прошивками збереженими у SPI Flash.
 // Рекомендована схема Flash-пам'яті:
 //
-//   Адреса 0x000000 - "Golden" bitstream (DDS, резервний)
-//   Адреса 0x200000 - Proshivka 2 (Logic Analyzer)
-//   Адреса 0x400000 - Proshivka 3 (Oscilloscope)
-//   Адреса 0x7FF000 - User data (частоти)
+//   Адреса 0x000000 — "Golden" bitstream (DDS, резервний)
+//   Адреса 0x200000 — Proshivka 2 (Logic Analyzer)
+//   Адреса 0x400000 — Proshivka 3 (Oscilloscope)
+//   Адреса 0x7FF000 — User data (частоти)
 //
 // Для XC7A35T bitstream ~ 1.7 MB → 0x200000 = 2 MB (безпечно).
 //
@@ -26,7 +26,7 @@ module multiboot (
     input  [23:0] target_addr   // адреса bitstream у SPI Flash
 );
 
-// ICAP_ARTIX7 - Internal Configuration Access Port
+// ICAP_ARTIX7 — Internal Configuration Access Port
 // Дозволяє надсилати конфігураційні команди FPGA з user logic
 localparam SYNC_WORD = 32'hAA995566;  // Sync word для config stream
 localparam IPROG_CMD = 32'h0000000F;  // Type 1 NOP + IPROG command
@@ -59,8 +59,8 @@ function [31:0] byte_rev;
     end
 endfunction
 
-// ICAPE2 - Internal Configuration Access Port (Vivado / 7-series)
-// ICAP_ARTIX7 - застаріла назва для ISE/XST, у Vivado не підтримується
+// ICAPE2 — Internal Configuration Access Port (Vivado / 7-series)
+// ICAP_ARTIX7 — застаріла назва для ISE/XST, у Vivado не підтримується
 ICAPE2 #(
     .DEVICE_ID   (32'h0362D093),  // XC7A35T JTAG IDCODE (тільки для симуляції)
     .ICAP_WIDTH  ("X32"),
@@ -68,7 +68,7 @@ ICAPE2 #(
 ) icap_inst (
     .I     (icap_data),   // 32-bit config data in
     .CLK   (clk),
-    .CSIB  (icap_csib),   // Active-Low chip enable (0 = enabled)
+    .CSIB  (icap_csib),   // Active-Low chip select (0 = enabled)
     .RDWRB (icap_rdwrb),  // 0 = write, 1 = read
     .O     (icap_out)     // readback (не використовуємо)
 );
@@ -115,7 +115,7 @@ always @(posedge clk) begin
             seq_idx   <= seq_idx + 1;
             if (seq_idx == 3'd6) icap_state <= 4'd3;
         end
-        4'd3: begin  // Очікуємо - FPGA перезавантажиться
+        4'd3: begin  // Очікуємо — FPGA перезавантажиться
             icap_csib <= 1;
             icap_state <= 4'd3;  // Зависаємо, reconfig відбудеться
         end

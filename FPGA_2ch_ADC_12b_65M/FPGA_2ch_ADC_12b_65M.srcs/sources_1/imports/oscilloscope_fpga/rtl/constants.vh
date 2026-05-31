@@ -74,41 +74,39 @@ parameter X_end = 480 - 1;
 parameter Y_START = 0;
 parameter Y_end = 800 - 1;
 
-// Перерахування для станів основної машини стану
-typedef enum logic [4:0] {
-    S_INIT = 0,           // Wait for PLL
-    S_RESET_LOW = 1,      // Low reset (100 ms)
-    S_RESET_HIGH =2,     // High reset (50 ms)
-    S_ROM_INIT =3,       // ROM initialization
-    S_SOFT_RESET =4,     // Soft reset (0x1100)
-    S_DELAY =5,          // Delay after initialization (120 ms)
-    S_SET_DIR= 6,        // Set direction (0x3600)
-    S_FILL=7,           // Fill screen
-    S_BACKLIGHT=8,       // Backlight on
-    S_IDLE = 9,
-    S_SET_XSTART_H = 10,   // Set xStart high byte (0x2A00)
-    S_SET_XSTART_L = 11,   // Set xStart low byte (0x2A01)
-    S_SET_XEND_H =12 ,     // Set xEnd high byte (0x2A02)
-    S_SET_XEND_L = 13,     // Set xEnd low byte (0x2A03)
-    S_SET_YSTART_H = 14,   // Set yStart high byte (0x2B00)
-    S_SET_YSTART_L = 15,   // Set yStart low byte (0x2B01)
-    S_SET_YEND_H =16,     // Set yEnd high byte (0x2B02)
-    S_SET_YEND_L =17,     // Set yEnd low byte (0x2B03)
-    S_DISPLAY_ON = 18,     // Enable display (0x2900)
-    S_SET_ADDR = 19,       // Set address (0x2C00)
-    S_PREP_FILL =20,      // Prepare for pixel fill
-    S_FILL_PIXELS = 21,    // Fill pixels
-    S_PAUSE=22           // Pause
-} state_t;
+// Стани основної машини стану (plain Verilog, was typedef enum)
+localparam [4:0]
+    S_INIT          = 5'd0,
+    S_RESET_LOW     = 5'd1,
+    S_RESET_HIGH    = 5'd2,
+    S_ROM_INIT      = 5'd3,
+    S_SOFT_RESET    = 5'd4,
+    S_DELAY         = 5'd5,
+    S_SET_DIR       = 5'd6,
+    S_FILL          = 5'd7,
+    S_BACKLIGHT     = 5'd8,
+    S_IDLE          = 5'd9,
+    S_SET_XSTART_H  = 5'd10,
+    S_SET_XSTART_L  = 5'd11,
+    S_SET_XEND_H    = 5'd12,
+    S_SET_XEND_L    = 5'd13,
+    S_SET_YSTART_H  = 5'd14,
+    S_SET_YSTART_L  = 5'd15,
+    S_SET_YEND_H    = 5'd16,
+    S_SET_YEND_L    = 5'd17,
+    S_DISPLAY_ON    = 5'd18,
+    S_SET_ADDR      = 5'd19,
+    S_PREP_FILL     = 5'd20,
+    S_FILL_PIXELS   = 5'd21,
+    S_PAUSE         = 5'd22;
 
 
-// Перерахування для типів writer
-typedef enum logic [2:0] {
-    WRITER_NONE  = 0,
-    WRITER_CMD = 1,
-    WRITER_CMD_DATA = 3,
-    WRITER_CMD_NDATA = 4,
-    WRITER_READ = 5
-} writer_t;
+// Типи writer (plain Verilog, was typedef enum)
+localparam [2:0]
+    WRITER_NONE     = 3'd0,
+    WRITER_CMD      = 3'd1,
+    WRITER_CMD_DATA = 3'd3,
+    WRITER_CMD_NDATA= 3'd4,
+    WRITER_READ     = 3'd5;
 
 `endif

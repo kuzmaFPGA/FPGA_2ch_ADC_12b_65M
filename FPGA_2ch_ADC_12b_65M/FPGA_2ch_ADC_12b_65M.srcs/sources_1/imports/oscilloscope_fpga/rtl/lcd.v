@@ -58,7 +58,7 @@ reg [15:0] cmd_data;
 reg [15:0] write_data;
 
 // State machine
-state_t state;
+reg [4:0] state;
 
 // Delay counter
 reg [31:0] delay_counter;
@@ -67,9 +67,6 @@ reg [31:0] delay_counter;
 reg cmd_start;
 reg cmd_data_start;
 reg cmd_ndata_start;
-wire cmd_done;
-wire cmd_data_done;
-wire cmd_ndata_done;
 wire next_data;
 
 // Multiplexer signals
@@ -80,7 +77,7 @@ wire cmd_LCD_WR, cmd_data_LCD_WR, cmd_ndata_LCD_WR, cmd_read_LCD_WR;
 wire cmd_LCD_RDX, cmd_data_LCD_RDX, cmd_ndata_LCD_RDX, cmd_read_LCD_RDX;
 
 // Active writer
-writer_t active_writer;
+reg [2:0] active_writer;
 
 // Pixel counter
 reg [31:0] total_pixels;
