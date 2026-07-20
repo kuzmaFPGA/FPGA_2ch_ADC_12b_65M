@@ -1,5 +1,5 @@
 // ============================================================
-// adc_capture.v — захоплення 2× паралельних АЦП у SDRAM
+// adc_capture.v - захоплення 2× паралельних АЦП у SDRAM
 //                 (BATCH-BURST + чистий пост-тригер)
 //
 // АЦП: 12-біт паралельні, 65 Msps, 2 канали
@@ -62,7 +62,15 @@ reg [DEPTH_W-1:0] cap_cnt;
 reg        arm_prev;
 reg [25:0] fifo_wdata; reg fifo_wen; reg trig_hit;
 reg        capturing;
-reg [19:0] auto_trig_cnt;   // авто-тригер: ~1M sample_tick без тригера → примусовий старт
+// Авто-тригер: рахує ТАКТИ adc_clk (не семпли!) у стані C_WAIT.
+// КРИТИЧНО: 'arm' виставляється диспетчером щоразу на початку кожного
+// scope-циклу render - набагато частіше за 70 мс. Якщо реальний сигнал
+// не перетинає trig_level, cap_state весь час скидається в C_WAIT
+// раніше ніж встигне спрацювати старий (надто повільний) таймаут,
+// і захоплення НІКОЛИ не завершується → на екрані порожньо/старий кадр.
+// 2^11 тактів adc_clk (60МГц) ≈ 34 мкс - на порядки швидше за один
+// прохід диспетчера (мс), тому авто-тригер завжди встигає спрацювати.
+reg [11:0] auto_trig_cnt;
 
 localparam C_IDLE=2'd0, C_WAIT=2'd1, C_CAP=2'd2, C_DONE=2'd3;
 
@@ -76,6 +84,9 @@ always @(posedge adc_clk or negedge reset_n) begin
         if (arm && !arm_prev) begin
             cap_state<=C_WAIT; cap_cnt<=0; capture_done<=0; capturing<=1;
             auto_trig_cnt<=0;
+        end else if (cap_state==C_WAIT) begin
+            // тікає кожен такт adc_clk - фіксований таймаут ~70 мс
+            auto_trig_cnt <= auto_trig_cnt + 1;
         end
         if (sample_tick) begin
             ch1_prev <= ch1_r;
@@ -87,9 +98,8 @@ always @(posedge adc_clk or negedge reset_n) begin
             end
             case (cap_state)
                 C_WAIT: begin
-                    auto_trig_cnt <= auto_trig_cnt + 1;
-                    // тригер: або сигнал, або таймаут авто-тригера (~1M sample_tick)
-                    if (trig_hit || auto_trig_cnt[19]) begin
+                    // тригер: або сигнал, або таймаут авто-тригера (~34 мкс)
+                    if (trig_hit || auto_trig_cnt[11]) begin
                         cap_state<=C_CAP; cap_cnt<=0; auto_trig_cnt<=0;
                         fifo_wdata<={1'b0,ch2_r,1'b0,ch1_r}; fifo_wen<=1;
                     end

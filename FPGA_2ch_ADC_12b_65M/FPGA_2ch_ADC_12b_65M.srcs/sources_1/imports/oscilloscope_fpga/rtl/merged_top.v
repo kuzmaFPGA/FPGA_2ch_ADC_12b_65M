@@ -152,7 +152,7 @@ endfunction
 // K_CHZ = 2^48 / (DAC_HZ * 100)
 // DAC_HZ = 150_000_000 → K_CHZ = 2^48 / 15_000_000_000 = 18764 (похибка 0.005%)
 localparam [47:0] K_CHZ = 48'd18764;
-localparam DDS_DIGITS = 8;  // 8-значне число частоти у 0.01 Гц
+localparam DDS_DIGITS = 10; // 8 цілих + 2 дробові цифри частоти (одиниця 0.01 Гц)
 localparam [1:0] WAVE_SINE=0, WAVE_SQUARE=1, WAVE_TRI=2, WAVE_PWM=3;
 // Мітки типів сигналу для гліф-буфера (glyph indices):
 //   "Sin " = 27(S),30(i),28(n),11( )
@@ -213,7 +213,7 @@ reg [DEPTH_W-1:0] pan; reg single_req, go_menu, ctrl_changed, test_mode;
 // -- DDS controls --
 reg [1:0]  wave_type;
 reg [3:0]  dds_digit [0:DDS_DIGITS-1];
-reg [2:0]  dds_cursor;
+reg [3:0]  dds_cursor;                  // курсор цифри 0..9
 reg        dds_updated;
 reg [13:0] pwm_threshold;              // ШИМ duty (0..16383, 50%=8192)
 // -- LA controls --
@@ -252,7 +252,7 @@ always @(posedge sys_clk or negedge reset_n) begin
     run_mode<=1; tdiv_idx<=4'd2; trig_level<=12'd2048; trig_edge<=0;
     pan<=0; single_req<=0; go_menu<=0;
     ctrl_changed<=0; test_mode<=0;
-    wave_type<=WAVE_SINE; dds_cursor<=3'd7;
+    wave_type<=WAVE_SINE; dds_cursor<=4'd7;  // старт на молодшій цілій цифрі (1 Гц)
     for(ki=0;ki<DDS_DIGITS;ki=ki+1) dds_digit[ki]<=4'd0;
     dds_updated<=0; pwm_threshold<=14'd8192;
     la_trig_edge<=0; la_run<=1; la_single_req<=0;
@@ -367,20 +367,25 @@ i2c_master #(.CLK_HZ(50_000_000), .I2C_HZ(10_000), .SLAVE_ADDR(7'h42), .DO_SCAN(
 wire dds_upd_lcd = dds_updated;
 
 // ════ DDS: phase_inc calculation ════
-// freq_chz = dds_digit[0]*10_000_000 + ... + dds_digit[7]  (unit = 0.01 Hz)
-wire [31:0] freq_chz =
-    {28'd0,dds_digit[0]}*32'd10_000_000 +
-    {28'd0,dds_digit[1]}*32'd1_000_000  +
-    {28'd0,dds_digit[2]}*32'd100_000    +
-    {28'd0,dds_digit[3]}*32'd10_000     +
-    {28'd0,dds_digit[4]}*32'd1_000      +
-    {28'd0,dds_digit[5]}*32'd100        +
-    {28'd0,dds_digit[6]}*32'd10         +
-    {28'd0,dds_digit[7]};
+// Частота = 8 цілих + 2 дробові цифри. Одиниця freq_chz = 0.01 Гц.
+// dds_digit[0..7] = ціла частина (10^7..10^0 Гц),
+// dds_digit[8..9] = дробова (0.1 та 0.01 Гц).
+// freq_chz = повне 10-значне число у сотих Гц (макс ~10^10 → 34 біт).
+wire [33:0] freq_chz =
+    {30'd0,dds_digit[0]}*34'd1_000_000_000 +
+    {30'd0,dds_digit[1]}*34'd100_000_000   +
+    {30'd0,dds_digit[2]}*34'd10_000_000    +
+    {30'd0,dds_digit[3]}*34'd1_000_000     +
+    {30'd0,dds_digit[4]}*34'd100_000       +
+    {30'd0,dds_digit[5]}*34'd10_000        +
+    {30'd0,dds_digit[6]}*34'd1_000         +
+    {30'd0,dds_digit[7]}*34'd100           +
+    {30'd0,dds_digit[8]}*34'd10            +
+    {30'd0,dds_digit[9]};
 
 reg [31:0] phase_inc;
 always @(posedge sys_clk)
-    phase_inc <= ({16'd0, freq_chz} * K_CHZ) >> 16;
+    phase_inc <= ({14'd0, freq_chz} * K_CHZ) >> 16;
 
 // CDC: phase_inc + wave_type (sys_clk → dac_clk)
 (* ASYNC_REG="TRUE" *) reg [31:0] phase_inc_s1=0, phase_inc_s2=0;
@@ -473,10 +478,18 @@ wire [11:0] adc_in2=tm_s2?(12'hFFF-test_cnt):adc_ch2;
 always @(posedge adc_clk) begin tidx_adc1<=tdiv_idx; tidx_adc2<=tidx_adc1; end
 wire [15:0] decimation=tdiv_decimation(tidx_adc2);
 
+// ── CDC: рівень і фронт тригера (sys_clk → adc_clk) ──
+(* ASYNC_REG="TRUE" *) reg [11:0] tl_a1=12'd2048, tl_a2=12'd2048;
+(* ASYNC_REG="TRUE" *) reg te_a1=0, te_a2=0;
+always @(posedge adc_clk) begin
+  tl_a1<=trig_level; tl_a2<=tl_a1;
+  te_a1<=trig_edge;  te_a2<=te_a1;
+end
+
 adc_capture #(.CH_BASE(CH_BASE),.DEPTH(DEPTH),.DEPTH_W(DEPTH_W),.BATCH(256)) adc_cap(
   .adc_clk(adc_clk),.reset_n(reset_n),
   .adc_ch1(adc_in1),.adc_ch2(adc_in2),
-  .decimation(decimation),.trig_level(trig_level),.trig_edge(trig_edge),
+  .decimation(decimation),.trig_level(tl_a2),.trig_edge(te_a2),
   .pre_trig(PRETRIG[DEPTH_W-1:0]),.arm(arm_adc_scope),.capture_done(capture_done_adc),
   .sdram_clk(sdram_clk),.sdram_cmd_ready(sd_cmd_ready_w),
   .sdram_cmd_en(cap_cmd_en),.sdram_cmd_we(cap_cmd_we),
@@ -643,13 +656,18 @@ wire [7:0] grow_4x = cur_glyph[{data_count[9:6], 3'b000} +: 8];
 wire       fbit_4x = grow_4x[data_count[4:2]];
 
 // DDS → 16×32, Scope → 16×16
-wire fbit = (mode_dds && text_mode) ? fbit_4x : fbit_2x;
+// text_mode у DDS (32×32) та у header/іконках (теж 32×32) використовує
+// 4x-масштабований гліф; звичайний текст (scope/LA, 16×16) - 2x.
+wire big_glyph = mode_dds || mode_hdr;
+wire fbit = (big_glyph && text_mode) ? fbit_4x : fbit_2x;
 
 // Підсвічення курсору DDS: якщо поточний символ = позиція курсора → инверсія кольорів
 reg cursor_char;   // 1 = цей символ під DDS-курсором
-wire [15:0] text_fg = cursor_char ? COL_BG   : COL_TEXT;
-wire [15:0] text_bg = cursor_char ? COL_CURS : COL_BG;
-wire [15:0] pixel_out = text_mode ? (fbit?text_fg:text_bg) : solid_color;
+// Кольори тексту - регістри: FSM задає їх у M_TGO (звичайний текст)
+// або у M_ICON_GO (іконки режимів зі станом-залежними кольорами).
+reg [15:0] txt_fg = COL_TEXT;
+reg [15:0] txt_bg = COL_BG;
+wire [15:0] pixel_out = text_mode ? (fbit?txt_fg:txt_bg) : solid_color;
 
 lcd lcd_inst(
   .clk(clk),.reset_n(reset_n),.fill_color(pixel_out),
@@ -678,16 +696,16 @@ always @(posedge lcd_clk) begin tidx_lcd1<=tdiv_idx; tidx_lcd2<=tidx_lcd1; end
 (* ASYNC_REG="TRUE" *) reg [1:0] wt_lcd1=0,wt_lcd2=0;
 always @(posedge lcd_clk) begin wt_lcd1<=wave_type; wt_lcd2<=wt_lcd1; end
 
-(* ASYNC_REG="TRUE" *) reg [31:0] finc_lcd1=0,finc_lcd2=0;
+(* ASYNC_REG="TRUE" *) reg [33:0] finc_lcd1=0,finc_lcd2=0;
 always @(posedge lcd_clk) begin finc_lcd1<=freq_chz; finc_lcd2<=finc_lcd1; end
 
-(* ASYNC_REG="TRUE" *) reg [2:0] dcur_lcd1=0,dcur_lcd2=0;
+(* ASYNC_REG="TRUE" *) reg [3:0] dcur_lcd1=0,dcur_lcd2=0;
 always @(posedge lcd_clk) begin dcur_lcd1<=dds_cursor; dcur_lcd2<=dcur_lcd1; end
 
-(* ASYNC_REG="TRUE" *) reg [3:0] ddig_lcd1[0:7],ddig_lcd2[0:7];
+(* ASYNC_REG="TRUE" *) reg [3:0] ddig_lcd1[0:DDS_DIGITS-1],ddig_lcd2[0:DDS_DIGITS-1];
 integer si;
 always @(posedge lcd_clk) begin
-  for(si=0;si<8;si=si+1) begin
+  for(si=0;si<DDS_DIGITS;si=si+1) begin
     ddig_lcd1[si]<=dds_digit[si]; ddig_lcd2[si]<=ddig_lcd1[si];
   end
 end
@@ -806,7 +824,16 @@ localparam
   M_UART_DW_LOW = 7'd75,  // чекати
   M_UART_DW_NXT = 7'd76,  // наступний байт
   // ── Dispatcher (одночасні режими) ──
-  M_DISPATCH    = 7'd77;  // вибір наступного увімкненого режиму
+  M_DISPATCH    = 7'd77,  // вибір наступного увімкненого режиму
+  M_DDS_ERASE   = 7'd78,  // заливка DDS-регіону фоном
+  M_DDS_ERASE_W = 7'd79,  // очікування заливки
+  // ── Пунктирна горизонтальна сітка (у циклі render, після erase стовпця) ──
+  M_GDOT        = 7'd80,  // крапка сітки на поточному стовпці
+  M_GDOT_W      = 7'd81,
+  // ── Іконки активних режимів (правий верхній кут, 2×2) ──
+  M_ICONS       = 7'd82,  // підготовка іконки
+  M_ICON_GO     = 7'd83,  // старт малювання
+  M_ICON_W      = 7'd84;  // очікування
 
 // ── UART: семплів/біт ──────────────────────────────────────
 // baud_period(baud_idx[2:0], tdiv_idx[3:0]) = 0 якщо недостатньо роздільної здатності
@@ -845,6 +872,12 @@ endfunction
 
 reg [6:0] mstate;
 reg [9:0] dx; reg [8:0] gy;
+reg [1:0] gdot_i;   // індекс крапки горизонтальної сітки (0..2)
+reg [1:0] ic_idx;   // індекс іконки режиму (0..3)
+reg [3:0] icon_prev; // попередній стан {uart_en,en_la,en_dds,en_scope} для change-detection
+// стовпець вертикальної лінії сітки: кожні 80 px (80,160,...,720)
+wire is_vgrid_col = (dx==10'd80)||(dx==10'd160)||(dx==10'd240)||(dx==10'd320)||
+                    (dx==10'd400)||(dx==10'd480)||(dx==10'd560)||(dx==10'd640)||(dx==10'd720);
 reg [8:0] py1,py2,cy1,cy2;
 reg capture_active_lcd; reg [5:0] tc;
 reg [27:0] wait_sd_cnt;
@@ -900,11 +933,13 @@ always @(posedge lcd_clk or negedge reset_n) begin
     uart_cnt<=0; uart_scan_x<=0; uart_bit_cnt<=0; uart_accum<=0;
     uart_prev_bit<=1; uart_start_x<=0; uart_di<=0;
     draw_ctx<=2'd0; disp_step<=2'd0; render_la_lcd<=0;
-    // layout defaults (all modes on)
-    r_dds_y0<=9'd16; r_scope_y0<=9'd48; r_scope_ye<=9'd255; r_scope_h<=9'd208;
-    r_la_y0<=9'd256; r_la_ye<=9'd447; r_la_ch_h<=9'd24;
-    r_uart_y0<=9'd448;
-    r_hgrid_y0<=9'd100; r_hgrid_y1<=9'd152; r_hgrid_y2<=9'd204;
+    gdot_i<=0; ic_idx<=0; icon_prev<=4'b1111; // форсує перше малювання (не збігається з дефолтом)
+    txt_fg<=COL_TEXT; txt_bg<=COL_BG;
+    // layout defaults (стартова комбінація scope+DDS, header=64px)
+    r_dds_y0<=9'd64; r_scope_y0<=9'd96; r_scope_ye<=9'd479; r_scope_h<=9'd384;
+    r_la_y0<=0; r_la_ye<=0; r_la_ch_h<=9'd24;
+    r_uart_y0<=0;
+    r_hgrid_y0<=9'd192; r_hgrid_y1<=9'd288; r_hgrid_y2<=9'd384;
     for(ti=0;ti<NCH;ti=ti+1) text_buf[ti]<=" ";
   end else begin
     update_screen<=0; bc_start<=0;
@@ -960,57 +995,69 @@ always @(posedge lcd_clk or negedge reset_n) begin
       M_DISPATCH: begin
         // ── Обчислення розмітки при початку нового циклу ──
         if(disp_step==2'd0) begin
-          // Контент: y=16..463 (448px). DDS=32px, UART=16px (якщо LA).
-          // Решта - між scope і LA.
+          // Header (y=0..63, 64px): статус-текст зліва + великі 32×32
+          // іконки режимів (x≥736). Контент: y=64..479 (416px).
+          // DDS=32px, UART=16px (якщо LA). Решта - між scope і LA.
+          // Вимкнений режим віддає своє місце сусідам.
+          //
+          // ВАЖЛИВО: r_hgrid_y0/1/2 задаються тут ЯВНИМИ константами,
+          // а не арифметикою на щойно призначених (non-blocking) регістрах
+          // r_scope_y0/r_scope_h - інакше читається СТАРЕ значення з
+          // попереднього режиму (лаг на 1 такт), і пунктирна сітка на
+          // мить малюється на неправильній позиції (в зоні тексту).
           case({en_scope_lcd, en_dds_lcd, en_la_lcd})
             3'b111: begin // Scope+DDS+LA
-              r_dds_y0<=9'd16;
-              r_scope_y0<=9'd48;  r_scope_ye<=9'd255; r_scope_h<=9'd208;
-              r_la_y0<=9'd256;    r_la_ye<=9'd447;    r_la_ch_h<=9'd24;
-              r_uart_y0<=9'd448;
+              r_dds_y0<=9'd64;
+              r_scope_y0<=9'd96;  r_scope_ye<=9'd303; r_scope_h<=9'd208;
+              r_la_y0<=9'd304;    r_la_ye<=9'd463;    r_la_ch_h<=9'd20;
+              r_uart_y0<=9'd464;
+              r_hgrid_y0<=9'd148; r_hgrid_y1<=9'd200; r_hgrid_y2<=9'd252;
             end
             3'b110: begin // Scope+DDS
-              r_dds_y0<=9'd16;
-              r_scope_y0<=9'd48;  r_scope_ye<=9'd463; r_scope_h<=9'd416;
+              r_dds_y0<=9'd64;
+              r_scope_y0<=9'd96;  r_scope_ye<=9'd479; r_scope_h<=9'd384;
               r_la_y0<=0; r_la_ye<=0; r_la_ch_h<=9'd24; r_uart_y0<=0;
+              r_hgrid_y0<=9'd192; r_hgrid_y1<=9'd288; r_hgrid_y2<=9'd384;
             end
             3'b101: begin // Scope+LA
               r_dds_y0<=0;
-              r_scope_y0<=9'd16;  r_scope_ye<=9'd231; r_scope_h<=9'd216;
-              r_la_y0<=9'd232;    r_la_ye<=9'd447;    r_la_ch_h<=9'd27;
-              r_uart_y0<=9'd448;
+              r_scope_y0<=9'd64;  r_scope_ye<=9'd263; r_scope_h<=9'd200;
+              r_la_y0<=9'd264;    r_la_ye<=9'd463;    r_la_ch_h<=9'd25;
+              r_uart_y0<=9'd464;
+              r_hgrid_y0<=9'd114; r_hgrid_y1<=9'd164; r_hgrid_y2<=9'd214;
             end
             3'b100: begin // Scope only
               r_dds_y0<=0;
-              r_scope_y0<=9'd16;  r_scope_ye<=9'd463; r_scope_h<=9'd448;
+              r_scope_y0<=9'd64;  r_scope_ye<=9'd479; r_scope_h<=9'd416;
               r_la_y0<=0; r_la_ye<=0; r_la_ch_h<=9'd24; r_uart_y0<=0;
+              r_hgrid_y0<=9'd168; r_hgrid_y1<=9'd272; r_hgrid_y2<=9'd376;
             end
-            3'b011: begin // DDS+LA
-              r_dds_y0<=9'd16;
+            3'b011: begin // DDS+LA (scope вимкнено - hgrid не використовується)
+              r_dds_y0<=9'd64;
               r_scope_y0<=0; r_scope_ye<=0; r_scope_h<=9'd208;
-              r_la_y0<=9'd48;     r_la_ye<=9'd447;    r_la_ch_h<=9'd50;
-              r_uart_y0<=9'd448;
+              r_la_y0<=9'd96;     r_la_ye<=9'd463;    r_la_ch_h<=9'd46;
+              r_uart_y0<=9'd464;
+              r_hgrid_y0<=0; r_hgrid_y1<=0; r_hgrid_y2<=0;
             end
             3'b010: begin // DDS only
-              r_dds_y0<=9'd16;
+              r_dds_y0<=9'd64;
               r_scope_y0<=0; r_scope_ye<=0; r_scope_h<=9'd208;
               r_la_y0<=0; r_la_ye<=0; r_la_ch_h<=9'd24; r_uart_y0<=0;
+              r_hgrid_y0<=0; r_hgrid_y1<=0; r_hgrid_y2<=0;
             end
             3'b001: begin // LA only
               r_dds_y0<=0;
               r_scope_y0<=0; r_scope_ye<=0; r_scope_h<=9'd208;
-              r_la_y0<=9'd16;     r_la_ye<=9'd447;    r_la_ch_h<=9'd54;
-              r_uart_y0<=9'd448;
+              r_la_y0<=9'd64;     r_la_ye<=9'd463;    r_la_ch_h<=9'd50;
+              r_uart_y0<=9'd464;
+              r_hgrid_y0<=0; r_hgrid_y1<=0; r_hgrid_y2<=0;
             end
             default: begin // none
               r_dds_y0<=0; r_scope_y0<=0; r_scope_ye<=0; r_scope_h<=9'd208;
               r_la_y0<=0; r_la_ye<=0; r_la_ch_h<=9'd24; r_uart_y0<=0;
+              r_hgrid_y0<=0; r_hgrid_y1<=0; r_hgrid_y2<=0;
             end
           endcase
-          // HGRID (обчислюються наступний такт коли scope_y0/h стабілізуються)
-          r_hgrid_y0 <= r_scope_y0 + (r_scope_h >> 2);
-          r_hgrid_y1 <= r_scope_y0 + (r_scope_h >> 1);
-          r_hgrid_y2 <= r_scope_y0 + r_scope_h - (r_scope_h >> 2);
         end
 
         // ── Диспетчеризація режимів ──
@@ -1020,15 +1067,62 @@ always @(posedge lcd_clk or negedge reset_n) begin
         end
         else if(disp_step<=2'd1 && en_dds_lcd) begin
           disp_step<=2'd2; draw_ctx<=2'd1;
-          mstate<=M_DDS_BLD;
+          mstate<=M_DDS_ERASE;
         end
         else if(disp_step<=2'd2 && en_la_lcd) begin
           disp_step<=2'd3; draw_ctx<=2'd2; render_la_lcd<=1;
           mstate<=M_LA_ARM;
         end
         else begin
+          // Кінець циклу: оновити іконки лише якщо стан режимів змінився
+          // (уникаємо зайвих перезаписів LCD - джерело мерехтіння)
           disp_step<=2'd0;
+          if(en_scope_lcd!=icon_prev[0] || en_dds_lcd!=icon_prev[1] ||
+             en_la_lcd  !=icon_prev[2] || uart_en_lcd!=icon_prev[3]) begin
+            icon_prev<={uart_en_lcd,en_la_lcd,en_dds_lcd,en_scope_lcd};
+            draw_ctx<=2'd3; ic_idx<=0; mstate<=M_ICONS;
+          end else begin
+            mstate<=M_DISPATCH;   // без змін - одразу новий цикл
+          end
         end
+      end
+
+      // ═══ Іконки активних режимів: 2×2, великі 32×32, правий верхній кут ═══
+      // Розкладка (x=736..799, y=0..63):  S G   (Scope / Generator/DDS)
+      //                                   L U   (LA    / UART decode)
+      // Активний режим: зелений фон + чорна літера.
+      // Вимкнений: темно-сірий фон + сірий контур літери.
+      M_ICONS: begin
+        text_mode<=1; cursor_char<=0;
+        case(ic_idx)
+          2'd0: begin cur_char<="S";
+                x_start<=16'd736; x_end<=16'd767; y_start<=9'd0;  y_end<=9'd31; end
+          2'd1: begin cur_char<="G";
+                x_start<=16'd768; x_end<=16'd799; y_start<=9'd0;  y_end<=9'd31; end
+          2'd2: begin cur_char<="L";
+                x_start<=16'd736; x_end<=16'd767; y_start<=9'd32; y_end<=9'd63; end
+          default: begin cur_char<="U";
+                x_start<=16'd768; x_end<=16'd799; y_start<=9'd32; y_end<=9'd63; end
+        endcase
+        mstate<=M_ICON_GO;
+      end
+      M_ICON_GO: begin
+        // кольори за станом відповідного режиму
+        case(ic_idx)
+          2'd0: begin txt_bg<=en_scope_lcd?COL_TEXT:COL_OFF;
+                      txt_fg<=en_scope_lcd?16'h0000:COL_GRID; end
+          2'd1: begin txt_bg<=en_dds_lcd  ?COL_TEXT:COL_OFF;
+                      txt_fg<=en_dds_lcd  ?16'h0000:COL_GRID; end
+          2'd2: begin txt_bg<=en_la_lcd   ?COL_TEXT:COL_OFF;
+                      txt_fg<=en_la_lcd   ?16'h0000:COL_GRID; end
+          default: begin txt_bg<=uart_en_lcd?COL_TEXT:COL_OFF;
+                         txt_fg<=uart_en_lcd?16'h0000:COL_GRID; end
+        endcase
+        update_screen<=1; mstate<=M_ICON_W;
+      end
+      M_ICON_W: if(cmd_ndata_done) begin
+        if(ic_idx==2'd3) begin text_mode<=0; mstate<=M_DISPATCH; end
+        else begin ic_idx<=ic_idx+1; mstate<=M_ICONS; end
       end
 
       // ═══ SCOPE FSM ═══
@@ -1046,11 +1140,31 @@ always @(posedge lcd_clk or negedge reset_n) begin
       end
       M_ERASE: begin
         text_mode<=0;
-        solid_color<=(dx[6:0]==7'd0)?COL_GRID:COL_BG;
+        // Вертикальні лінії сітки кожні 80 px (10 поділок на екран)
+        solid_color<= is_vgrid_col ? COL_GRID : COL_BG;
         x_start<=dx; x_end<=dx; y_start<=r_scope_y0; y_end<=r_scope_ye;
         update_screen<=1; mstate<=M_ERASE_W;
       end
-      M_ERASE_W: if(cmd_ndata_done) mstate<=M_CH1;
+      M_ERASE_W: if(cmd_ndata_done) begin
+        // Пунктирні горизонталі (25/50/75%): крапка кожні 4 px
+        if(dx[1:0]==2'd0 && !is_vgrid_col) begin gdot_i<=0; mstate<=M_GDOT; end
+        else mstate<=M_CH1;
+      end
+      // ── Крапки горизонтальної сітки на поточному стовпці ──
+      M_GDOT: begin
+        solid_color<=COL_GRID;
+        x_start<=dx; x_end<=dx;
+        case(gdot_i)
+          2'd0: begin y_start<=r_hgrid_y0; y_end<=r_hgrid_y0; end
+          2'd1: begin y_start<=r_hgrid_y1; y_end<=r_hgrid_y1; end
+          default: begin y_start<=r_hgrid_y2; y_end<=r_hgrid_y2; end
+        endcase
+        update_screen<=1; mstate<=M_GDOT_W;
+      end
+      M_GDOT_W: if(cmd_ndata_done) begin
+        if(gdot_i==2'd2) mstate<=M_CH1;
+        else begin gdot_i<=gdot_i+1; mstate<=M_GDOT; end
+      end
       M_CH1: begin
         solid_color<=COL_CH1; x_start<=dx; x_end<=dx;
         y_start<={7'd0,s1_lo}; y_end<={7'd0,s1_hi};
@@ -1106,9 +1220,12 @@ always @(posedge lcd_clk or negedge reset_n) begin
       // ── Відображення тексту (SCOPE/LA: 16×16, 40 симв; DDS: 32×32, 18 симв) ──
       M_TSET: begin
         text_mode<=1; cur_char<=text_buf[tc[5:0]];
-        // Підсвічення курсора лише в DDS (цифри chars 8-15)
-        cursor_char <= mode_dds && (tc >= 8) && (tc < 16)
-                       && ((tc - 6'd8) == {3'd0, dcur_lcd2});
+        // Підсвічення курсора DDS: цілі цифри (поз.8..15 → курсор 0..7),
+        // дробові (поз.17..18 → курсор 8..9). Кома (поз.16) не підсвічується.
+        cursor_char <= mode_dds && (
+                         ((tc>=8) && (tc<16) && ((tc-6'd8)      == {2'd0,dcur_lcd2})) ||
+                         ((tc>=17)&& (tc<19) && ((tc-6'd17+6'd8)== {2'd0,dcur_lcd2}))
+                       );
         if(mode_dds) begin
           x_start <= {tc, 5'b0}; x_end <= {tc, 5'b0} + 16'd31;  // 32 пікс
           y_start <= r_dds_y0;     y_end <= r_dds_y0 + 9'd31;
@@ -1118,10 +1235,15 @@ always @(posedge lcd_clk or negedge reset_n) begin
         end
         mstate<=M_TGO;
       end
-      M_TGO: begin update_screen<=1; mstate<=M_TW; end
+      M_TGO: begin
+        // кольори звичайного тексту (з інверсією під курсором DDS)
+        txt_fg <= cursor_char ? COL_BG   : COL_TEXT;
+        txt_bg <= cursor_char ? COL_CURS : COL_BG;
+        update_screen<=1; mstate<=M_TW;
+      end
       M_TW: if(cmd_ndata_done) begin
         if(mode_dds) begin
-          if(tc+1 >= 18) begin text_mode<=0; mstate<=M_CHECK; end
+          if(tc+1 >= 21) begin text_mode<=0; mstate<=M_CHECK; end
           else begin tc<=tc+1; mstate<=M_TSET; end
         end else begin
           if(tc+1>=NCH) begin text_mode<=0; mstate<=M_CHECK; end
@@ -1138,17 +1260,31 @@ always @(posedge lcd_clk or negedge reset_n) begin
       end
 
       // ═══ DDS FSM ═══
+      // ── Заливка всього DDS-регіону фоном (щоб не лишалось "хвостів") ──
+      M_DDS_ERASE: begin
+        text_mode<=0;
+        solid_color<=COL_OFF;
+        x_start<=0; x_end<=SCREEN_W-1;
+        y_start<=r_dds_y0; y_end<=r_dds_y0+9'd31;
+        update_screen<=1; mstate<=M_DDS_ERASE_W;
+      end
+      M_DDS_ERASE_W: if(cmd_ndata_done) mstate<=M_DDS_BLD;
+
       M_DDS_BLD: begin
-        // "DDS Sine 00000000Hz"  (18 символів × 32px)
+        // "DDS Sine 12345678.90Hz"  (21 символ × 32px)
         text_buf[0]<="D"; text_buf[1]<="D"; text_buf[2]<="S"; text_buf[3]<=" ";
         text_buf[4]<=wl[31:24]; text_buf[5]<=wl[23:16];
         text_buf[6]<=wl[15:8];  text_buf[7]<=wl[7:0];
+        // ціла частина - 8 цифр (позиції 8..15)
         text_buf[8] <=8'h30+ddig_lcd2[0]; text_buf[9] <=8'h30+ddig_lcd2[1];
         text_buf[10]<=8'h30+ddig_lcd2[2]; text_buf[11]<=8'h30+ddig_lcd2[3];
         text_buf[12]<=8'h30+ddig_lcd2[4]; text_buf[13]<=8'h30+ddig_lcd2[5];
         text_buf[14]<=8'h30+ddig_lcd2[6]; text_buf[15]<=8'h30+ddig_lcd2[7];
-        text_buf[16]<="H"; text_buf[17]<="z";
-        for(ti=18;ti<NCH;ti=ti+1) text_buf[ti]<=" ";
+        text_buf[16]<=".";                              // десяткова кома
+        // дробова частина - 2 цифри (позиції 17..18)
+        text_buf[17]<=8'h30+ddig_lcd2[8]; text_buf[18]<=8'h30+ddig_lcd2[9];
+        text_buf[19]<="H"; text_buf[20]<="z";
+        for(ti=21;ti<NCH;ti=ti+1) text_buf[ti]<=" ";
         tc<=0; mstate<=M_TSET;
       end
 
